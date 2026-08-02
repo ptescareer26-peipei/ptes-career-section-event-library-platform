@@ -176,7 +176,7 @@ def send_admin_email(details):
                     <li><b>Requested Venue:</b> {details['Venue']}</li>
                     <li><b>Target Audience:</b> {details['Audience']}</li>
                     <li><b>Proposal Details:</b> {details['Details']}</li>
-                    <li><b>Materials Link:</b> {details['Materials']}</li>
+                    <li><b>Materials Link / Files:</b> {details['Materials']}</li>
                 </ul>
             </body>
         </html>
@@ -340,8 +340,9 @@ with tab1:
                     st.write(f"**Target Audience:** {row['Target Audience']}")
                     st.write(f"**Organization:** {row['Organization Body']}")
                     st.write(f"**Facilitator:** {row['Facilitator Name']} ({row['Contact Number']})")
-                    if pd.notnull(row['Materials_Link']) and str(row['Materials_Link']).strip():
-                        st.write(f"**Materials Link:** {row['Materials_Link']}")
+                    
+                    mat_val = str(row['Materials_Link']) if pd.notnull(row['Materials_Link']) else "0 File(s)"
+                    st.write(f"**Materials Attached:** {mat_val}")
         else:
             st.info("No events scheduled or requested for this date.")
     else:
@@ -367,11 +368,16 @@ with tab2:
                 else:
                     st.warning(f"⏳ Status: **{row['Status']}** (Awaiting PTES Admin Confirmation)")
 
-                links_str = str(row['Materials_Link']) if pd.notnull(row['Materials_Link']) else ""
-                doc_links = [link.strip() for link in links_str.split(",") if link.strip()]
+                raw_link_val = str(row['Materials_Link']) if pd.notnull(row['Materials_Link']) else ""
+                
+                # Check for valid Google Drive URLs
+                if raw_link_val and raw_link_val != "0 File(s)":
+                    doc_links = [link.strip() for link in raw_link_val.split(",") if link.strip().startswith("http")]
+                else:
+                    doc_links = []
 
                 if doc_links:
-                    st.write(f"Found **{len(doc_links)}** document(s) for this event:")
+                    st.write(f"📎 Found **{len(doc_links)}** document(s) attached:")
 
                     doc_options = [f"Document {i+1}: {doc_links[i][:50]}..." for i in range(len(doc_links))]
                     selected_doc_label = st.radio("Select a document to preview:", doc_options)
@@ -393,7 +399,7 @@ with tab2:
                         st.markdown("**💾 Save / Hard Copy:**")
                         st.markdown(f'<a href="{active_url}" target="_blank"><button style="background-color:#10B981; color:white; padding:10px 20px; border:none; border-radius:5px; font-weight:bold; cursor:pointer;">⬇️ DOWNLOAD / OPEN</button></a>', unsafe_allow_html=True)
                 else:
-                    st.info(f"No document links attached to Event ID `{row['Event ID']}` yet.")
+                    st.info(f"ℹ️ No documents uploaded for Event ID `{row['Event ID']}` (Count: 0).")
         else:
             st.error(f"No event found matching Event ID '{search_id}'.")
     elif search_id:
@@ -421,8 +427,9 @@ with tab3:
                 st.write(f"**Facilitator:** {row['Facilitator Name']} ({row['Contact Number']})")
                 st.write(f"**Requested Venue:** {row['Venue']}")
                 st.write(f"**Target Audience:** {row['Target Audience']}")
-                if pd.notnull(row['Materials_Link']) and str(row['Materials_Link']).strip():
-                    st.write(f"**Materials Link:** {row['Materials_Link']}")
+                
+                mat_val = str(row['Materials_Link']) if pd.notnull(row['Materials_Link']) else "0 File(s)"
+                st.write(f"**Materials / Files:** {mat_val}")
 
     st.divider()
 
@@ -455,7 +462,6 @@ with tab3:
                 target_id = selected_to_approve.split("]")[0].replace("[", "")
                 master_data.loc[master_data['Event ID'] == target_id, 'Status'] = "Officially Confirmed"
                 
-                # Re-index strictly to DB_COLUMNS before writing back to Google Sheets
                 clean_df = master_data.reindex(columns=DB_COLUMNS)
                 conn.update(data=clean_df)
                 st.cache_data.clear()
@@ -522,10 +528,12 @@ with tab4:
             seq_num = f"{(len(events_same_day) + 1):02d}"
             generated_event_id = f"CS-{yy}-{mm}-{seq_num}"
 
-            materials_link_req = ""
+            # Set file count or upload files to Drive
             if uploaded_pdfs:
                 with st.spinner("Uploading PDF documents to Google Drive..."):
                     materials_link_req = upload_multiple_pdfs_to_drive(uploaded_pdfs, generated_event_id)
+            else:
+                materials_link_req = "0 File(s)"
 
             audience_str = ", ".join(target_aud_req)
 
@@ -571,7 +579,7 @@ with tab4:
                     f"📅 *Date:* {formatted_prop_date}\n"
                     f"📍 *Venue:* {venue_req}\n"
                     f"👥 *Target Audience:* {audience_str}\n"
-                    f"📄 *Materials:* {materials_link_req}\n"
+                    f"📄 *Materials / Files:* {materials_link_req}\n"
                     f"📝 *Details:* {event_proposal}"
                 )
                 encoded_wa = urllib.parse.quote(wa_message)
