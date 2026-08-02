@@ -16,9 +16,15 @@ st.set_page_config(page_title="PTES Career Section Portal", layout="wide")
 
 custom_css = """
 <style>
+    /* Main Background & Sidebar Styling */
     .stApp, .stAppViewContainer, [data-testid="stHeader"] {
         background-color: #E5C2F5 !important;
     }
+    [data-testid="stSidebar"] {
+        background-color: #FAE48F !important;
+    }
+
+    /* Header Container Styling */
     .header-container {
         background-color: #D4FA8F;
         padding: 20px;
@@ -32,9 +38,8 @@ custom_css = """
         font-weight: 800;
         margin-bottom: 5px;
     }
-    [data-testid="stSidebar"] {
-        background-color: #FAE48F !important;
-    }
+
+    /* Form Container & Block Styling */
     div[data-testid="stForm"] {
         background-color: #FDE7FE !important;
         padding: 20px !important;
@@ -44,6 +49,24 @@ custom_css = """
         background-color: #FABBFC !important;
         border-radius: 12px !important;
         padding: 10px !important;
+    }
+
+    /* -------------------------------------------------- */
+    /* TAB TITLE STYLING: BOLD FONT                       */
+    /* -------------------------------------------------- */
+    button[data-baseweb="tab"],
+    button[data-baseweb="tab"] *,
+    [data-testid="stTab"],
+    [data-testid="stTab"] * {
+        font-weight: 900 !important;
+        font-size: 13pt !important;
+    }
+    
+    button[data-baseweb="tab"] {
+        background-color: rgba(255, 255, 255, 0.4) !important;
+        border-radius: 8px 8px 0px 0px !important;
+        padding: 8px 16px !important;
+        margin-right: 4px !important;
     }
 </style>
 """
@@ -119,6 +142,12 @@ try:
 except Exception:
     master_data = pd.DataFrame(columns=DB_COLUMNS)
 
+# Fetch Admin Password from secrets safely
+try:
+    target_password = st.secrets["admin_password"]
+except KeyError:
+    target_password = None
+
 # ==========================================
 # HEADER SECTION
 # ==========================================
@@ -137,38 +166,13 @@ with st.sidebar:
         logo = Image.open('ptes_logo.PNG')
         st.image(logo, use_container_width=True)
     except Exception:
-        st.info("Logo image 'ptes_logo.png' optional.")
+        st.info("Logo image 'ptes_logo.PNG' optional.")
 
     st.header("⚙️ Admin Management")
-    admin_password = st.text_input("Enter Admin Password", type="password")
-
-    try:
-        target_password = st.secrets["admin_password"]
-    except KeyError:
-        target_password = None
+    admin_password = st.text_input("Enter Admin Password", type="password", key="sidebar_password")
 
     if target_password and admin_password == target_password:
-        st.subheader("✅ Approve Pending Requests")
-        if not master_data.empty:
-            pending_events = master_data[master_data['Status'] == "Pending Approval"]
-            
-            if not pending_events.empty:
-                pending_options = [
-                    f"[{row['Event ID']}] {row['Title']} ({row['Date']})" 
-                    for _, row in pending_events.iterrows()
-                ]
-                selected_pending = st.selectbox("Select Pending Request", pending_options)
-                
-                if st.button("Approve Request", type="primary"):
-                    selected_id = selected_pending.split("]")[0].replace("[", "")
-                    master_data.loc[master_data['Event ID'] == selected_id, 'Status'] = "Officially Confirmed"
-                    conn.update(data=master_data)
-                    st.cache_data.clear()
-                    st.success(f"Event `{selected_id}` has been Officially Confirmed!")
-                    st.rerun()
-            else:
-                st.info("No pending requests to approve.")
-
+        st.success("✅ Admin Access Active")
         st.divider()
         st.subheader("🗑️ Delete / Cancel Event")
         if not master_data.empty:
@@ -194,9 +198,9 @@ with st.sidebar:
 # ==========================================
 tab1, tab2, tab3, tab4 = st.tabs([
     "📅 Event Calendar", 
-    "🔍 Materials & Document Preview", 
-    "📤 Upload & Venue Booking", 
-    "✉️ External Requests"
+    "🔍 Information Preview", 
+    "📤 Pending Approvals & Venues", 
+    "✉️ New Request"
 ])
 
 # ==========================================
@@ -261,7 +265,6 @@ with tab1:
         day_details = month_events[month_events['Date'] == selected_date_str]
         if not day_details.empty:
             for _, row in day_details.iterrows():
-                # Display status tag color
                 status_color = "🟢" if row['Status'] == "Officially Confirmed" else "🟡"
                 
                 with st.expander(f"{status_color} [{row['Event ID']}] {row['Title']} ({row['Time']}) - Status: {row['Status']}", expanded=True):
@@ -293,7 +296,6 @@ with tab2:
             for _, row in matched_event.iterrows():
                 st.markdown(f"### 📌 Event: **{row['Title']}** (`{row['Event ID']}`)")
                 
-                # Show status badge
                 if row['Status'] == "Officially Confirmed":
                     st.success(f"✅ Status: **{row['Status']}**")
                 else:
@@ -332,87 +334,73 @@ with tab2:
         st.info("Database is empty.")
 
 # ==========================================
-# TAB 3: ADMIN DIRECT BOOKING & PUBLISH
+# TAB 3: PENDING EVENTS DASHBOARD & ADMIN APPROVAL
 # ==========================================
 with tab3:
-    st.subheader("📤 Book Venue & Publish Career Event (Direct Confirmation)")
+    st.subheader("📤 Pending Events Dashboard & Authorizations")
+    st.markdown("This dashboard lists all events requiring attention that are currently in **Pending Approval** status.")
 
-    with st.form("upload_event_form"):
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            title = st.text_input("Event Title (e.g., UBD Admissions Talk)")
-            org_body = st.text_input("Organization Body (e.g., PTES Career Section)")
-            facilitator = st.text_input("Facilitator Name")
-            contact_no = st.text_input("Contact Number (e.g., +673 8123456)")
-            event_date = st.date_input("Event Date", min_value=datetime.today())
-            time_slot = st.selectbox("Time Slot", ["08:00 - 10:00", "10:30 - 12:30", "14:00 - 16:30", "Whole Day"])
+    # 1. Display Pending Events List (Visible to all users and admin)
+    if not master_data.empty:
+        pending_events_df = master_data[master_data['Status'] == "Pending Approval"]
+    else:
+        pending_events_df = pd.DataFrame()
 
-        with col2:
-            venue = st.selectbox("Book Venue (Resource Room)", [
-                "Lecture Theatre 2 [100 - Level 3]",
-                "Lecture Theatre 1 [100 pax- Level 2]",
-                "Multi-Media Theatre [200 pax - Level 2]",
-                "MPH Multi-Purpose Hall [750 pax-A building]"
-            ])
-            
-            target_audience = st.multiselect("Target Audience", [
-                "Lower 6th",
-                "Upper 6th",
-                "PTES Staff",
-                "PIBG or Parents",
-                "other Association (Public)"
-            ])
-            
-            materials_link = st.text_input("Google Drive / PDF Links (Separate multiple links with commas)")
+    if pending_events_df.empty:
+        st.success("🎉 No pending events require attention at the moment!")
+    else:
+        st.info(f"There are currently **{len(pending_events_df)}** event(s) awaiting review.")
+        for _, row in pending_events_df.iterrows():
+            with st.expander(f"🟡 [{row['Event ID']}] {row['Title']} ({row['Date']} - {row['Time']})", expanded=True):
+                st.write(f"**Organization Body:** {row['Organization Body']}")
+                st.write(f"**Facilitator:** {row['Facilitator Name']} ({row['Contact Number']})")
+                st.write(f"**Requested Venue:** {row['Venue']}")
+                st.write(f"**Target Audience:** {row['Target Audience']}")
+                if pd.notnull(row['Materials_Link']) and str(row['Materials_Link']).strip():
+                    st.write(f"**Materials Link:** {row['Materials_Link']}")
 
-        submit_upload = st.form_submit_button("Confirm Booking & Publish Event")
+    st.divider()
 
-    if submit_upload:
-        if title and org_body and facilitator and contact_no and venue and target_audience:
-            formatted_date = event_date.strftime("%d/%m/%Y")
-            
-            # Check venue clash
-            clash = master_data[
-                (master_data['Date'] == formatted_date) & 
-                (master_data['Venue'] == venue) &
-                (master_data['Time'] == time_slot)
+    # 2. Password-Protected Admin Authorization Panel
+    st.markdown("### 🔐 Admin Authorization Panel")
+    st.caption("Enter the admin password below to unlock status changing capabilities.")
+    
+    tab3_password_input = st.text_input("Enter Password for Approval Actions", type="password", key="tab3_pwd")
+
+    # Verify authorization via tab 3 input or sidebar password
+    is_authorized = (
+        (target_password and tab3_password_input == target_password) or 
+        (target_password and admin_password == target_password)
+    )
+
+    if is_authorized:
+        st.success("🔓 Admin Authorization Granted!")
+
+        # Explicit reminder callout for FM Portal venue booking
+        st.warning("""
+        **⚠️ IMPORTANT REMINDER FOR ADMIN:**  
+        Before approving any event below, please ensure you **book the venue using the FM portal** (available from the FM Admin) and verify there are **NO CLASHES** of date and time with existing venue usage!
+        """)
+
+        if not pending_events_df.empty:
+            pending_options = [
+                f"[{row['Event ID']}] {row['Title']} ({row['Date']} at {row['Venue']})" 
+                for _, row in pending_events_df.iterrows()
             ]
-            
-            if not clash.empty:
-                st.error(f"❌ Venue Clash: {venue} is already booked on {formatted_date} at {time_slot}!")
-            else:
-                yy = event_date.strftime("%y")
-                mm = event_date.strftime("%m")
+            selected_to_approve = st.selectbox("Select Pending Event to Authorize", pending_options)
 
-                events_same_day = master_data[master_data['Date'] == formatted_date]
-                count_same_day = len(events_same_day) + 1
-                seq_num = f"{count_same_day:02d}"
-
-                generated_event_id = f"CS-{yy}-{mm}-{seq_num}"
-                audience_str = ", ".join(target_audience)
-
-                new_row = pd.DataFrame([{
-                    "Event ID": generated_event_id,
-                    "Date": formatted_date,
-                    "Time": time_slot,
-                    "Title": title,
-                    "Venue": venue,
-                    "Target Audience": audience_str,
-                    "Organization Body": org_body,
-                    "Facilitator Name": facilitator,
-                    "Contact Number": contact_no,
-                    "Materials_Link": materials_link,
-                    "Status": "Officially Confirmed"
-                }])[DB_COLUMNS]
-
-                updated_master = pd.concat([master_data, new_row], ignore_index=True)
-                conn.update(data=updated_master)
+            if st.button("✅ Approve & Change Status to Officially Confirmed", type="primary"):
+                target_id = selected_to_approve.split("]")[0].replace("[", "")
+                master_data.loc[master_data['Event ID'] == target_id, 'Status'] = "Officially Confirmed"
+                conn.update(data=master_data)
                 st.cache_data.clear()
                 st.balloons()
-                st.success(f"✅ Event Published! Assigned Event ID: **{generated_event_id}**")
+                st.success(f"🎉 Event `{target_id}` status successfully updated to **Officially Confirmed**!")
+                st.rerun()
         else:
-            st.error("Please fill in all required form fields.")
+            st.info("No pending events available to authorize.")
+    else:
+        st.info("🔒 Enter password above to access venue confirmation and status change tools.")
 
 # ==========================================
 # TAB 4: EXTERNAL REQUESTS WITH DOCUMENTS & NOTIFICATION OPTIONS
@@ -457,7 +445,6 @@ with tab4:
         if org_name and contact_email and title_req and facilitator_req and contact_no_req:
             formatted_prop_date = proposed_date.strftime("%d/%m/%Y")
             
-            # Generate Event ID for tracking with Pending Status
             yy = proposed_date.strftime("%y")
             mm = proposed_date.strftime("%m")
             events_same_day = master_data[master_data['Date'] == formatted_prop_date]
@@ -466,7 +453,6 @@ with tab4:
 
             audience_str = ", ".join(target_aud_req)
 
-            # Save as "Pending Approval" in Google Sheets
             new_request_row = pd.DataFrame([{
                 "Event ID": generated_event_id,
                 "Date": formatted_prop_date,
@@ -500,7 +486,6 @@ with tab4:
                 "Materials": materials_link_req
             }
 
-            # Send selected notifications
             if notify_method in ["WhatsApp Link", "Both"]:
                 wa_message = (
                     f"📌 *NEW CAREER EVENT REQUEST [{generated_event_id}]*\n\n"
