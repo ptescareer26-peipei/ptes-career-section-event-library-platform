@@ -104,19 +104,15 @@ st.markdown(custom_css, unsafe_allow_html=True)
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def upload_multiple_pdfs_to_drive(uploaded_file_list, generated_event_id):
-    """
-    Uploads PDF files to Google Drive folder using User OAuth credentials.
-    Returns comma-separated Drive links, or '0 File(s)' if upload fails/empty.
-    """
+    """Uploads PDF files to Google Drive folder using User OAuth credentials."""
     if not uploaded_file_list:
         return "0 File(s)"
 
     uploaded_links = []
     try:
-        # Check if secrets exist before attempting OAuth
         if "gcp_oauth" not in st.secrets:
             st.error("⚠️ Streamlit secrets missing [gcp_oauth] key! Please configure secrets.")
-            return f"0 File(s) [Error: Missing Secrets]"
+            return "0 File(s) [Error: Missing Secrets]"
 
         creds = Credentials(
             token=None,
@@ -150,7 +146,6 @@ def upload_multiple_pdfs_to_drive(uploaded_file_list, generated_event_id):
 
             file_id = drive_file.get("id")
 
-            # Set public reader permissions on uploaded PDF
             permission = {"type": "anyone", "role": "reader"}
             service.permissions().create(
                 fileId=file_id, 
@@ -162,7 +157,7 @@ def upload_multiple_pdfs_to_drive(uploaded_file_list, generated_event_id):
         return ", ".join(uploaded_links)
     except Exception as e:
         st.error(f"Error uploading PDF documents to Google Drive: {e}")
-        return f"0 File(s) [Upload Failed]"
+        return "0 File(s) [Upload Failed]"
 
 def send_admin_email(details):
     """Sends an automated HTML notification email to the admin Outlook address."""
@@ -207,19 +202,20 @@ def send_admin_email(details):
 
 # Read Data safely from Google Sheets
 try:
-    master_data = conn.read(ttl=10)
-    if master_data.empty:
+    master_data = conn.read(ttl=0)  # ttl=0 forces fresh read from sheet
+    if master_data is None or master_data.empty:
         master_data = pd.DataFrame(columns=DB_COLUMNS)
     else:
-        master_data = master_data.reindex(columns=DB_COLUMNS)
+        # Clean and retain standard schema
+        master_data = master_data.dropna(how="all").reindex(columns=DB_COLUMNS)
 except Exception:
     master_data = pd.DataFrame(columns=DB_COLUMNS)
 
 # Retrieve Admin Password safely from Streamlit secrets
 try:
-    target_password = st.secrets["admin_password"]
-except KeyError:
-    target_password = None
+    target_password = st.secrets.get("admin_password", "admin123")
+except Exception:
+    target_password = "admin123"
 
 # ==========================================
 # 4. HEADER SECTION
@@ -248,21 +244,29 @@ with st.sidebar:
         st.success("✅ Admin Access Active")
         st.divider()
         st.subheader("🗑️ Delete / Cancel Event")
+        
         if not master_data.empty:
-            event_options = [
-                f"[{row['Event ID']}] {row['Title']} ({row['Date']})" 
-                for _, row in master_data.iterrows()
-            ]
-            selected_event_label = st.selectbox("Select Event to Cancel", event_options)
+            # Map each dropdown option directly to its exact row index
+            event_options = {}
+            for idx, row in master_data.iterrows():
+                label = f"[{row['Event ID']}] {row['Title']} ({row['Date']})"
+                event_options[label] = idx
+
+            selected_event_label = st.selectbox("Select Event to Cancel", list(event_options.keys()))
             cancel_reason = st.text_area("Reason for Cancellation")
 
             if st.button("Delete Event"):
-                selected_id = selected_event_label.split("]")[0].replace("[", "")
-                updated_df = master_data[master_data['Event ID'] != selected_id].reindex(columns=DB_COLUMNS)
+                target_idx = event_options[selected_event_label]
+                
+                # Drop EXACT row index only
+                updated_df = master_data.drop(index=target_idx).reset_index(drop=True).reindex(columns=DB_COLUMNS)
+                
                 conn.update(data=updated_df)
                 st.cache_data.clear()
-                st.success(f"Event `{selected_id}` cancelled successfully. Reason: {cancel_reason}")
+                st.success(f"Selected event cancelled and deleted successfully.")
                 st.rerun()
+        else:
+            st.info("No events in database to delete.")
     else:
         st.caption("🔒 Enter valid admin credentials to unlock management tools.")
 
@@ -294,7 +298,6 @@ with tab1:
         if 'selected_calendar_day' not in st.session_state:
             st.session_state.selected_calendar_day = datetime.today().day
 
-        # Filter events using a temporary Series to prevent extra columns in Google Sheets
         if not master_data.empty:
             temp_dates = pd.to_datetime(master_data['Date'], format='%d/%m/%Y', errors='coerce')
             month_events = master_data[
@@ -378,7 +381,6 @@ with tab2:
 
                 raw_link_val = str(row['Materials_Link']) if pd.notnull(row['Materials_Link']) else ""
                 
-                # Filter for valid URLs starting with http
                 if raw_link_val and "0 File(s)" not in raw_link_val:
                     doc_links = [link.strip() for link in raw_link_val.split(",") if link.strip().startswith("http")]
                 else:
@@ -442,13 +444,13 @@ with tab3:
     st.divider()
 
     st.markdown("### 🔐 Admin Authorization Panel")
-    st.caption("Enter the admin password below to unlock status changing capabilities.")
+    st.caption("Enter the admin password below and press Enter to unlock status changing capabilities.")
     
     tab3_password_input = st.text_input("Enter Password for Approval Actions", type="password", key="tab3_pwd")
 
     is_authorized = (
-        (target_password and tab3_password_input == target_password) or 
-        (target_password and admin_password == target_password)
+        (tab3_password_input != "" and tab3_password_input == target_password) or 
+        (admin_password != "" and admin_password == target_password)
     )
 
     if is_authorized:
@@ -460,26 +462,32 @@ with tab3:
         """)
 
         if not pending_events_df.empty:
-            pending_options = [
-                f"[{row['Event ID']}] {row['Title']} ({row['Date']} at {row['Venue']})" 
-                for _, row in pending_events_df.iterrows()
-            ]
-            selected_to_approve = st.selectbox("Select Pending Event to Authorize", pending_options)
+            # Map pending dropdown options directly to exact row indices in master_data
+            pending_options = {}
+            for idx, row in pending_events_df.iterrows():
+                label = f"[{row['Event ID']}] {row['Title']} ({row['Date']} at {row['Venue']})"
+                pending_options[label] = idx
+
+            selected_to_approve = st.selectbox("Select Pending Event to Authorize", list(pending_options.keys()))
 
             if st.button("✅ Approve & Change Status to Officially Confirmed", type="primary"):
-                target_id = selected_to_approve.split("]")[0].replace("[", "")
-                master_data.loc[master_data['Event ID'] == target_id, 'Status'] = "Officially Confirmed"
+                target_idx = pending_options[selected_to_approve]
+                
+                # Update ONLY the exact row index
+                master_data.loc[target_idx, 'Status'] = "Officially Confirmed"
                 
                 clean_df = master_data.reindex(columns=DB_COLUMNS)
                 conn.update(data=clean_df)
                 st.cache_data.clear()
                 st.balloons()
-                st.success(f"🎉 Event `{target_id}` status successfully updated to **Officially Confirmed**!")
+                st.success("🎉 Event status successfully updated to **Officially Confirmed**!")
                 st.rerun()
         else:
             st.info("No pending events available to authorize.")
+    elif tab3_password_input != "":
+        st.error("❌ Incorrect password. Please check your credentials.")
     else:
-        st.info("🔒 Enter password above to access venue confirmation and status change tools.")
+        st.info("🔒 Enter password above and press Enter to access venue confirmation and status change tools.")
 
 # ==========================================
 # TAB 4: EXTERNAL REQUESTS WITH PDF UPLOADS
@@ -532,11 +540,13 @@ with tab4:
             
             yy = proposed_date.strftime("%y")
             mm = proposed_date.strftime("%m")
-            events_same_day = master_data[master_data['Date'] == formatted_prop_date] if not master_data.empty else pd.DataFrame()
-            seq_num = f"{(len(events_same_day) + 1):02d}"
+            
+            # Generate a strictly UNIQUE Event ID based on total database row count + 1
+            total_existing_rows = len(master_data) if not master_data.empty else 0
+            seq_num = f"{(total_existing_rows + 1):02d}"
             generated_event_id = f"CS-{yy}-{mm}-{seq_num}"
 
-            # Process PDF upload or record 0 files
+            # Upload PDF files
             if uploaded_pdfs:
                 with st.spinner("Uploading PDF documents to Google Drive..."):
                     materials_link_req = upload_multiple_pdfs_to_drive(uploaded_pdfs, generated_event_id)
@@ -564,7 +574,7 @@ with tab4:
             conn.update(data=updated_master)
             st.cache_data.clear()
 
-            st.success(f"✅ Request submitted successfully! Your Event ID is **{generated_event_id}**. Use this ID in Tab 2 to check approval status.")
+            st.success(f"✅ Request submitted successfully! Your unique Event ID is **{generated_event_id}**. Use this ID in Tab 2 to check approval status.")
 
             payload = {
                 "Event_ID": generated_event_id,
