@@ -20,9 +20,8 @@ from googleapiclient.http import MediaIoBaseUpload
 # ==========================================
 st.set_page_config(page_title="PTES Career Section Portal", layout="wide")
 
-# ⚠️ REPLACE THIS WITH YOUR ACTUAL GOOGLE DRIVE FOLDER ID
+# Google Drive Target Folder ID
 GDRIVE_FOLDER_ID = "1yFdDBqKb73uM3lcCWmvl9AJr5ETVnrWc"
-#1yFdDBqKb73uM3lcCWmvl9AJr5ETVnrWc
 
 # ==========================================
 # STYLING (GLOBAL CSS)
@@ -112,13 +111,10 @@ DB_COLUMNS = [
 
 def upload_multiple_pdfs_to_drive(uploaded_file_list, generated_event_id):
     """
-    Uploads a list of PDF files to Google Drive, automatically renaming each file
-    to match the Event ID (e.g., CS-26-08-01_Doc1.pdf).
-    Returns a comma-separated string of shareable viewer links.
+    Uploads PDF files to Google Drive and returns shareable viewer links.
     """
     uploaded_links = []
     try:
-        # Load Google Service Account credentials from secrets
         creds = service_account.Credentials.from_service_account_info(
             st.secrets["gcp_service_account"],
             scopes=["https://www.googleapis.com/auth/drive"]
@@ -126,7 +122,6 @@ def upload_multiple_pdfs_to_drive(uploaded_file_list, generated_event_id):
         service = build("drive", "v3", credentials=creds)
 
         for index, pdf_file in enumerate(uploaded_file_list, start=1):
-            # Dynamic renaming rule
             renamed_title = f"{generated_event_id}_Doc{index}.pdf"
 
             file_metadata = {
@@ -140,7 +135,6 @@ def upload_multiple_pdfs_to_drive(uploaded_file_list, generated_event_id):
                 resumable=True
             )
 
-            # Upload to Google Drive
             drive_file = service.files().create(
                 body=file_metadata,
                 media_body=media,
@@ -149,7 +143,6 @@ def upload_multiple_pdfs_to_drive(uploaded_file_list, generated_event_id):
 
             file_id = drive_file.get("id")
 
-            # Enable public viewer access for Streamlit iframe previewing
             permission = {"type": "anyone", "role": "reader"}
             service.permissions().create(fileId=file_id, body=permission).execute()
 
@@ -232,7 +225,7 @@ st.markdown("""
 with st.sidebar:
     try:
         logo = Image.open('ptes_logo.PNG')
-        st.image(logo, use_container_width=True)
+        st.image(logo, width='stretch')
     except Exception:
         st.info("Logo image 'ptes_logo.PNG' optional.")
 
@@ -254,7 +247,10 @@ with st.sidebar:
             if st.button("Delete Event"):
                 selected_id = selected_event_label.split("]")[0].replace("[", "")
                 updated_df = master_data[master_data['Event ID'] != selected_id].reindex(columns=DB_COLUMNS)
-                conn.update(data=updated_df)
+                conn.update(
+                    spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"],
+                    data=updated_df
+                )
                 st.cache_data.clear()
                 st.success(f"Event `{selected_id}` cancelled successfully. Reason: {cancel_reason}")
                 st.rerun()
@@ -318,7 +314,7 @@ with tab1:
                         
                         btn_label = f"🔴 {day:02d}" if day_has_events else f"⚪ {day:02d}"
                         
-                        if st.button(btn_label, key=f"cal_btn_{day}_{selected_month}_{selected_year}", use_container_width=True):
+                        if st.button(btn_label, key=f"cal_btn_{day}_{selected_month}_{selected_year}", width='stretch'):
                             st.session_state.selected_calendar_day = day
 
     active_day = st.session_state.selected_calendar_day
@@ -456,7 +452,10 @@ with tab3:
             if st.button("✅ Approve & Change Status to Officially Confirmed", type="primary"):
                 target_id = selected_to_approve.split("]")[0].replace("[", "")
                 master_data.loc[master_data['Event ID'] == target_id, 'Status'] = "Officially Confirmed"
-                conn.update(data=master_data)
+                conn.update(
+                    spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"],
+                    data=master_data
+                )
                 st.cache_data.clear()
                 st.balloons()
                 st.success(f"🎉 Event `{target_id}` status successfully updated to **Officially Confirmed**!")
@@ -470,9 +469,8 @@ with tab3:
 # TAB 4: EXTERNAL REQUESTS WITH PDF UPLOADS
 # ==========================================
 with tab4:
-    st.subheader("✉️ New Career Event Request Form")
+    st.subheader("✉️ External Organization Event Request Form")
 
-    # Outside form to allow file selection prior to form submit
     col_req1, col_req2 = st.columns(2)
     
     with col_req1:
@@ -486,11 +484,10 @@ with tab4:
         proposed_date = st.date_input("Proposed Event Date", min_value=datetime.today())
         time_slot_req = st.selectbox("Preferred Time Slot", ["08:00 - 10:00", "10:30 - 12:30", "14:00 - 16:30", "Whole Day"])
         venue_req = st.selectbox("Preferred Venue", [
-            "Lecture Theatre Two  [100 pax - Level 3]",
-            "Lecture Theatre One  [100 pax - Level 2]",
-            "Multi-Media Theatre  [270 pax - Level 2]",
-            "PTES Conference Room [ 30 pax - Level 2]",
-            "PTES Multi-Purpose Hall [780 pax-A building]"
+            "Lecture Theatre 2 [100 - Level 3]",
+            "Lecture Theatre 1 [100 pax- Level 2]",
+            "Multi-Media Theatre [200 pax - Level 2]",
+            "MPH Multi-Purpose Hall [750 pax-A building]"
         ])
         target_aud_req = st.multiselect("Target Audience", [
             "Lower 6th",
@@ -500,7 +497,6 @@ with tab4:
             "other Association (Public)"
         ])
 
-    # PDF File Uploader (Strict PDF restriction, supports multiple files)
     uploaded_pdfs = st.file_uploader(
         "Upload Proposal & Supporting Documents (PDF Format Only)",
         type=["pdf"],
@@ -524,7 +520,6 @@ with tab4:
             seq_num = f"{(len(events_same_day) + 1):02d}"
             generated_event_id = f"CS-{yy}-{mm}-{seq_num}"
 
-            # Process PDF Uploads if attached
             materials_link_req = ""
             if uploaded_pdfs:
                 with st.spinner("Uploading PDF documents to Google Drive..."):
@@ -547,7 +542,12 @@ with tab4:
             }])[DB_COLUMNS]
 
             updated_master = pd.concat([master_data, new_request_row], ignore_index=True)
-            conn.update(data=updated_master)
+            
+            # Explicit update call passing spreadsheet reference
+            conn.update(
+                spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"],
+                data=updated_master
+            )
             st.cache_data.clear()
 
             st.success(f"✅ Request submitted successfully! Your Event ID is **{generated_event_id}**. Use this ID in Tab 2 to check approval status.")
