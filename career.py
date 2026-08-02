@@ -106,10 +106,18 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 def upload_multiple_pdfs_to_drive(uploaded_file_list, generated_event_id):
     """
     Uploads PDF files to Google Drive folder using User OAuth credentials.
-    Uses personal Gmail account quota (15 GB) to bypass 0-byte Service Account quota limits.
+    Returns comma-separated Drive links, or '0 File(s)' if upload fails/empty.
     """
+    if not uploaded_file_list:
+        return "0 File(s)"
+
     uploaded_links = []
     try:
+        # Check if secrets exist before attempting OAuth
+        if "gcp_oauth" not in st.secrets:
+            st.error("⚠️ Streamlit secrets missing [gcp_oauth] key! Please configure secrets.")
+            return f"0 File(s) [Error: Missing Secrets]"
+
         creds = Credentials(
             token=None,
             refresh_token=st.secrets["gcp_oauth"]["refresh_token"],
@@ -154,7 +162,7 @@ def upload_multiple_pdfs_to_drive(uploaded_file_list, generated_event_id):
         return ", ".join(uploaded_links)
     except Exception as e:
         st.error(f"Error uploading PDF documents to Google Drive: {e}")
-        return ""
+        return f"0 File(s) [Upload Failed]"
 
 def send_admin_email(details):
     """Sends an automated HTML notification email to the admin Outlook address."""
@@ -341,7 +349,7 @@ with tab1:
                     st.write(f"**Organization:** {row['Organization Body']}")
                     st.write(f"**Facilitator:** {row['Facilitator Name']} ({row['Contact Number']})")
                     
-                    mat_val = str(row['Materials_Link']) if pd.notnull(row['Materials_Link']) else "0 File(s)"
+                    mat_val = str(row['Materials_Link']) if pd.notnull(row['Materials_Link']) and str(row['Materials_Link']).strip() else "0 File(s)"
                     st.write(f"**Materials Attached:** {mat_val}")
         else:
             st.info("No events scheduled or requested for this date.")
@@ -370,8 +378,8 @@ with tab2:
 
                 raw_link_val = str(row['Materials_Link']) if pd.notnull(row['Materials_Link']) else ""
                 
-                # Check for valid Google Drive URLs
-                if raw_link_val and raw_link_val != "0 File(s)":
+                # Filter for valid URLs starting with http
+                if raw_link_val and "0 File(s)" not in raw_link_val:
                     doc_links = [link.strip() for link in raw_link_val.split(",") if link.strip().startswith("http")]
                 else:
                     doc_links = []
@@ -428,7 +436,7 @@ with tab3:
                 st.write(f"**Requested Venue:** {row['Venue']}")
                 st.write(f"**Target Audience:** {row['Target Audience']}")
                 
-                mat_val = str(row['Materials_Link']) if pd.notnull(row['Materials_Link']) else "0 File(s)"
+                mat_val = str(row['Materials_Link']) if pd.notnull(row['Materials_Link']) and str(row['Materials_Link']).strip() else "0 File(s)"
                 st.write(f"**Materials / Files:** {mat_val}")
 
     st.divider()
@@ -528,7 +536,7 @@ with tab4:
             seq_num = f"{(len(events_same_day) + 1):02d}"
             generated_event_id = f"CS-{yy}-{mm}-{seq_num}"
 
-            # Set file count or upload files to Drive
+            # Process PDF upload or record 0 files
             if uploaded_pdfs:
                 with st.spinner("Uploading PDF documents to Google Drive..."):
                     materials_link_req = upload_multiple_pdfs_to_drive(uploaded_pdfs, generated_event_id)
