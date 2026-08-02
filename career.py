@@ -1,14 +1,15 @@
 import io
-import streamlit as st
+import calendar
+import smtplib
+import urllib.parse
+from datetime import datetime
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
 import pandas as pd
 from PIL import Image
+import streamlit as st
 from streamlit_gsheets import GSheetsConnection
-from datetime import datetime
-import calendar
-import urllib.parse
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 
 # Google API client libraries for Drive uploads
 from google.oauth2 import service_account
@@ -16,15 +17,33 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 
 # ==========================================
-# PAGE CONFIGURATION & GOOGLE DRIVE SETTINGS
+# 1. PAGE CONFIGURATION & GLOBAL CONSTANTS
 # ==========================================
 st.set_page_config(page_title="PTES Career Section Portal", layout="wide")
 
 # Google Drive Target Folder ID
 GDRIVE_FOLDER_ID = "1yFdDBqKb73uM3lcCWmvl9AJr5ETVnrWc"
 
+# Default Admin WhatsApp Contact
+ADMIN_WA_NUMBER = "6737318186"
+
+# Database Columns Schema
+DB_COLUMNS = [
+    "Event ID", 
+    "Date", 
+    "Time", 
+    "Title", 
+    "Venue", 
+    "Target Audience", 
+    "Organization Body", 
+    "Facilitator Name", 
+    "Contact Number", 
+    "Materials_Link", 
+    "Status"
+]
+
 # ==========================================
-# STYLING (GLOBAL CSS)
+# 2. STYLING (CUSTOM GLOBAL CSS)
 # ==========================================
 custom_css = """
 <style>
@@ -90,28 +109,14 @@ custom_css = """
 st.markdown(custom_css, unsafe_allow_html=True)
 
 # ==========================================
-# DATABASE SCHEMA & GOOGLE DRIVE FUNCTIONS
+# 3. DATABASE & DRIVE HELPER FUNCTIONS
 # ==========================================
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-ADMIN_WA_NUMBER = "6737318186"
-DB_COLUMNS = [
-    "Event ID", 
-    "Date", 
-    "Time", 
-    "Title", 
-    "Venue", 
-    "Target Audience", 
-    "Organization Body", 
-    "Facilitator Name", 
-    "Contact Number", 
-    "Materials_Link", 
-    "Status"
-]
-
 def upload_multiple_pdfs_to_drive(uploaded_file_list, generated_event_id):
     """
-    Uploads PDF files to Google Drive and returns shareable viewer links.
+    Uploads PDF files to Google Drive folder using Service Account credentials.
+    Uses supportsAllDrives=True to handle shared folder upload authorizations.
     """
     uploaded_links = []
     try:
@@ -135,16 +140,23 @@ def upload_multiple_pdfs_to_drive(uploaded_file_list, generated_event_id):
                 resumable=True
             )
 
+            # Upload file with supportsAllDrives parameter
             drive_file = service.files().create(
                 body=file_metadata,
                 media_body=media,
-                fields="id, webViewLink"
+                fields="id, webViewLink",
+                supportsAllDrives=True
             ).execute()
 
             file_id = drive_file.get("id")
 
+            # Set public reader permissions on uploaded PDF
             permission = {"type": "anyone", "role": "reader"}
-            service.permissions().create(fileId=file_id, body=permission).execute()
+            service.permissions().create(
+                fileId=file_id, 
+                body=permission,
+                supportsAllDrives=True
+            ).execute()
 
             uploaded_links.append(drive_file.get("webViewLink"))
 
@@ -154,6 +166,7 @@ def upload_multiple_pdfs_to_drive(uploaded_file_list, generated_event_id):
         return ""
 
 def send_admin_email(details):
+    """Sends an automated HTML notification email to the admin Outlook address."""
     try:
         sender_email = st.secrets["SENDER_EMAIL"]
         sender_password = st.secrets["SENDER_PASSWORD"]
@@ -193,7 +206,7 @@ def send_admin_email(details):
         st.warning(f"Request saved, but automated email alert failed: {e}")
         return False
 
-# Read Data safely
+# Read Data safely from Google Sheets
 try:
     master_data = conn.read(ttl=10)
     if master_data.empty:
@@ -203,14 +216,14 @@ try:
 except Exception:
     master_data = pd.DataFrame(columns=DB_COLUMNS)
 
-# Fetch Admin Password from secrets safely
+# Retrieve Admin Password safely from Streamlit secrets
 try:
     target_password = st.secrets["admin_password"]
 except KeyError:
     target_password = None
 
 # ==========================================
-# HEADER SECTION
+# 4. HEADER SECTION
 # ==========================================
 st.markdown("""
     <div class="header-container">
@@ -220,7 +233,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# SIDEBAR: ADMIN MANAGEMENT
+# 5. SIDEBAR: ADMIN MANAGEMENT
 # ==========================================
 with st.sidebar:
     try:
@@ -258,7 +271,7 @@ with st.sidebar:
         st.caption("🔒 Enter valid admin credentials to unlock management tools.")
 
 # ==========================================
-# TAB NAVIGATION
+# 6. TAB NAVIGATION
 # ==========================================
 tab1, tab2, tab3, tab4 = st.tabs([
     "📅 Event Calendar", 
