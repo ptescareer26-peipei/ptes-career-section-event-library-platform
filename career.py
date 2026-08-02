@@ -21,7 +21,7 @@ from googleapiclient.http import MediaIoBaseUpload
 st.set_page_config(page_title="PTES Career Section Portal", layout="wide")
 
 # ⚠️ REPLACE THIS WITH YOUR ACTUAL GOOGLE DRIVE FOLDER ID
-GDRIVE_FOLDER_ID = "https://drive.google.com/drive/u/2/folders/1yFdDBqKb73uM3lcCWmvl9AJr5ETVnrWc"
+GDRIVE_FOLDER_ID = "1yFdDBqKb73uM3lcCWmvl9AJr5ETVnrWc"
 
 # ==========================================
 # STYLING (GLOBAL CSS)
