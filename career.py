@@ -24,7 +24,7 @@ st.set_page_config(page_title="PTES Career Section Portal", layout="wide")
 # Google Drive Target Folder ID
 GDRIVE_FOLDER_ID = "1yFdDBqKb73uM3lcCWmvl9AJr5ETVnrWc"
 
-# Default Admin WhatsApp Contact
+# Default Admin WhatsApp Contact Number
 ADMIN_WA_NUMBER = "6737318186"
 
 # Database Columns Schema (Strictly Columns A through K)
@@ -99,7 +99,7 @@ custom_css = """
 st.markdown(custom_css, unsafe_allow_html=True)
 
 # ==========================================
-# 3. DATABASE & DRIVE HELPER FUNCTIONS
+# 3. HELPER FUNCTIONS & CONNECTIONS
 # ==========================================
 conn = st.connection("gsheets", type=GSheetsConnection)
 
@@ -111,7 +111,7 @@ def upload_multiple_pdfs_to_drive(uploaded_file_list, generated_event_id):
     uploaded_links = []
     try:
         if "gcp_oauth" not in st.secrets:
-            st.error("⚠️ Streamlit secrets missing [gcp_oauth] key! Please configure secrets.")
+            st.error("⚠️ Streamlit secrets missing [gcp_oauth] key! Please check your secrets configuration.")
             return "0 File(s) [Error: Missing Secrets]"
 
         creds = Credentials(
@@ -211,7 +211,7 @@ try:
 except Exception:
     master_data = pd.DataFrame(columns=DB_COLUMNS)
 
-# Retrieve Admin Password safely from Streamlit secrets
+# Retrieve Admin Password safely from Streamlit secrets (defaults to "admin123" if omitted)
 try:
     target_password = st.secrets.get("admin_password", "admin123")
 except Exception:
@@ -258,12 +258,12 @@ with st.sidebar:
             if st.button("Delete Event"):
                 target_idx = event_options[selected_event_label]
                 
-                # Drop EXACT row index only
+                # Drop EXACT row index only to prevent wiping other rows
                 updated_df = master_data.drop(index=target_idx).reset_index(drop=True).reindex(columns=DB_COLUMNS)
                 
                 conn.update(data=updated_df)
                 st.cache_data.clear()
-                st.success(f"Selected event cancelled and deleted successfully.")
+                st.success("Selected event cancelled and deleted successfully.")
                 st.rerun()
         else:
             st.info("No events in database to delete.")
@@ -456,6 +456,11 @@ with tab3:
     if is_authorized:
         st.success("🔓 Admin Authorization Granted!")
 
+        # Display persistent success notification after approval page rerun
+        if "approval_success_msg" in st.session_state:
+            st.success(st.session_state.approval_success_msg)
+            del st.session_state.approval_success_msg
+
         st.warning("""
         **⚠️ IMPORTANT REMINDER FOR ADMIN:**  
         Before approving any event below, please ensure you **book the venue using the FM portal** (available from the FM Admin) and verify there are **NO CLASHES** of date and time with existing venue usage!
@@ -473,14 +478,22 @@ with tab3:
             if st.button("✅ Approve & Change Status to Officially Confirmed", type="primary"):
                 target_idx = pending_options[selected_to_approve]
                 
-                # Update ONLY the exact row index
-                master_data.loc[target_idx, 'Status'] = "Officially Confirmed"
+                approved_event_id = master_data.loc[target_idx, 'Event ID']
+                approved_event_title = master_data.loc[target_idx, 'Title']
+
+                # 1. Visual spinner during sheet sync
+                with st.spinner(f"Updating status for Event ID [{approved_event_id}]... Please wait."):
+                    master_data.loc[target_idx, 'Status'] = "Officially Confirmed"
+                    
+                    clean_df = master_data.reindex(columns=DB_COLUMNS)
+                    conn.update(data=clean_df)
+                    st.cache_data.clear()
+
+                # 2. Store success message in Session State for persistence after rerun
+                st.session_state.approval_success_msg = f"👍 **SUCCESS!** Event ID **[{approved_event_id}] - {approved_event_title}** has been officially confirmed and updated in Google Sheets!"
                 
-                clean_df = master_data.reindex(columns=DB_COLUMNS)
-                conn.update(data=clean_df)
-                st.cache_data.clear()
+                # 3. Trigger celebration and refresh
                 st.balloons()
-                st.success("🎉 Event status successfully updated to **Officially Confirmed**!")
                 st.rerun()
         else:
             st.info("No pending events available to authorize.")
@@ -541,7 +554,7 @@ with tab4:
             yy = proposed_date.strftime("%y")
             mm = proposed_date.strftime("%m")
             
-            # Generate a strictly UNIQUE Event ID based on total database row count + 1
+            # Generate a unique Event ID based on total database row count
             total_existing_rows = len(master_data) if not master_data.empty else 0
             seq_num = f"{(total_existing_rows + 1):02d}"
             generated_event_id = f"CS-{yy}-{mm}-{seq_num}"
