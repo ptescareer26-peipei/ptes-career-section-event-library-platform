@@ -52,28 +52,26 @@ custom_css = """
     }
 
     /* -------------------------------------------------- */
-    /* 1. TAB STYLING: BOLD TITLE TEXT                    */
+    /* 1. TAB STYLING: FORCE BOLD FONT FOR ALL TAB TITLES */
     /* -------------------------------------------------- */
-    button[data-baseweb="tab"] p {
+    button[data-baseweb="tab"],
+    button[data-baseweb="tab"] *,
+    [data-testid="stTab"],
+    [data-testid="stTab"] * {
+        font-weight: 900 !important;
         font-size: 13pt !important;
-        font-weight: bold !important;
-        color: #111111 !important;
     }
+    
     button[data-baseweb="tab"] {
         background-color: rgba(255, 255, 255, 0.4) !important;
         border-radius: 8px 8px 0px 0px !important;
         padding: 8px 16px !important;
         margin-right: 4px !important;
     }
-    button[aria-selected="true"] {
-        background-color: #FFFFFF !important;
-        border-bottom: 4px solid #45DB24 !important;
-    }
 
     /* -------------------------------------------------- */
-    /* 2. INPUT BARS: BACKGROUND COLOR #D6FA8F (NO BORDER) */
+    /* 2. INPUT BARS: BACKGROUND COLOR #D6FA8F            */
     /* -------------------------------------------------- */
-    /* Set background color #D6FA8F for all input widgets */
     div[data-baseweb="base-input"],
     div[data-baseweb="input"],
     div[data-baseweb="select"] > div,
@@ -84,7 +82,6 @@ custom_css = """
         border-radius: 8px !important;
     }
 
-    /* Inner input element transparency */
     div[data-baseweb="base-input"] input,
     div[data-baseweb="input"] input {
         background-color: transparent !important;
