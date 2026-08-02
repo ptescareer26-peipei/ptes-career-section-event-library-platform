@@ -218,7 +218,7 @@ with st.sidebar:
 tab1, tab2, tab3, tab4 = st.tabs([
     "📅 Event Calendar", 
     "🔍 Information Preview", 
-    "📤 Event Materials Upload", 
+    "📤 Information Upload", 
     "✉️ New Request"
 ])
 
@@ -343,7 +343,7 @@ with tab2:
                         st.components.v1.iframe(preview_url, height=500, scrolling=True)
 
                     with col_btn:
-                        st.markdown("**💾 Save / Hard Copy:**")
+                        st.markdown("**💾 Save To Hard Drive**")
                         st.markdown(f'<a href="{active_url}" target="_blank"><button style="background-color:#10B981; color:white; padding:10px 20px; border:none; border-radius:5px; font-weight:bold; cursor:pointer;">⬇️ DOWNLOAD / OPEN</button></a>', unsafe_allow_html=True)
                 else:
                     st.info(f"No document links attached to Event ID `{row['Event ID']}` yet.")
