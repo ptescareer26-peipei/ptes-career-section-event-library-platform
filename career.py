@@ -10,7 +10,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 # ==========================================
-# PAGE CONFIGURATION & ENHANCED STYLING
+# PAGE CONFIGURATION & STYLING
 # ==========================================
 st.set_page_config(page_title="PTES Career Section Portal", layout="wide")
 
@@ -52,7 +52,7 @@ custom_css = """
     }
 
     /* -------------------------------------------------- */
-    /* 1. TAB STYLING: BOLD TITLES                        */
+    /* TAB TITLE STYLING: BOLD FONT                       */
     /* -------------------------------------------------- */
     button[data-baseweb="tab"],
     button[data-baseweb="tab"] *,
@@ -67,32 +67,6 @@ custom_css = """
         border-radius: 8px 8px 0px 0px !important;
         padding: 8px 16px !important;
         margin-right: 4px !important;
-    }
-
-    /* -------------------------------------------------- */
-    /* 2. ALL INPUT BARS: COLOR #D6FA8F                   */
-    /* -------------------------------------------------- */
-    /* Text Inputs, Selectboxes, Datepickers, TextAreas */
-    div[data-testid="stTextInput"] div[data-baseweb="input"],
-    div[data-testid="stTextInput"] div[data-baseweb="base-input"],
-    div[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
-    div[data-testid="stDateInput"] div[data-baseweb="input"],
-    div[data-testid="stMultiSelect"] div[data-baseweb="select"] > div,
-    div[data-testid="stTextArea"] textarea,
-    div[data-baseweb="base-input"],
-    div[data-baseweb="input"] {
-        background-color: #D6FA8F !important;
-        border: none !important;
-        box-shadow: none !important;
-        border-radius: 8px !important;
-    }
-
-    /* Text color inside all input fields */
-    div[data-baseweb="base-input"] input,
-    div[data-baseweb="input"] input,
-    div[data-baseweb="select"] span {
-        background-color: transparent !important;
-        color: #111111 !important;
     }
 </style>
 """
