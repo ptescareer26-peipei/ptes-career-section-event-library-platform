@@ -351,9 +351,9 @@ with st.sidebar:
 # ==========================================
 tab1, tab2, tab3, tab4 = st.tabs([
     "📅 Event Calendar", 
-    "🔍 Information Preview & File Manager", 
-    "📤 Pending Approvals & Venues", 
-    "✉️ New Request"
+    "🔍 Information Preview", 
+    "📤 Status Approvals", 
+    "✉️ New Event Request"
 ])
 
 # ==========================================
