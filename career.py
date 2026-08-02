@@ -469,7 +469,7 @@ with tab3:
 # TAB 4: EXTERNAL REQUESTS WITH PDF UPLOADS
 # ==========================================
 with tab4:
-    st.subheader("✉️ External Organization Event Request Form")
+    st.subheader("✉️ New Career Event Request Form")
 
     # Outside form to allow file selection prior to form submit
     col_req1, col_req2 = st.columns(2)
