@@ -243,6 +243,12 @@ with st.sidebar:
     if target_password and admin_password == target_password:
         st.success("✅ Admin Access Active")
         st.divider()
+
+        # Display persistent success message after event deletion rerun
+        if "delete_success_msg" in st.session_state:
+            st.warning(st.session_state.delete_success_msg)
+            del st.session_state.delete_success_msg
+
         st.subheader("🗑️ Delete / Cancel Event")
         
         if not master_data.empty:
@@ -255,15 +261,23 @@ with st.sidebar:
             selected_event_label = st.selectbox("Select Event to Cancel", list(event_options.keys()))
             cancel_reason = st.text_area("Reason for Cancellation")
 
-            if st.button("Delete Event"):
+            if st.button("Delete Event", type="primary"):
                 target_idx = event_options[selected_event_label]
-                
-                # Drop EXACT row index only to prevent wiping other rows
-                updated_df = master_data.drop(index=target_idx).reset_index(drop=True).reindex(columns=DB_COLUMNS)
-                
-                conn.update(data=updated_df)
-                st.cache_data.clear()
-                st.success("Selected event cancelled and deleted successfully.")
+                deleted_id = master_data.loc[target_idx, 'Event ID']
+                deleted_title = master_data.loc[target_idx, 'Title']
+
+                # 1. Visual spinner during sheet sync
+                with st.spinner(f"Deleting Event ID [{deleted_id}] from Google Sheets... Please wait."):
+                    # Drop EXACT row index only to prevent wiping other rows
+                    updated_df = master_data.drop(index=target_idx).reset_index(drop=True).reindex(columns=DB_COLUMNS)
+                    
+                    conn.update(data=updated_df)
+                    st.cache_data.clear()
+
+                # 2. Store persistent deletion confirmation message in Session State
+                st.session_state.delete_success_msg = f"🗑️ **DELETED!** Event ID **[{deleted_id}] - {deleted_title}** has been removed from Google Sheets."
+
+                # 3. Trigger app refresh
                 st.rerun()
         else:
             st.info("No events in database to delete.")
