@@ -415,7 +415,7 @@ with tab3:
 # TAB 4: EXTERNAL REQUESTS WITH DOCUMENTS & NOTIFICATION OPTIONS
 # ==========================================
 with tab4:
-    st.subheader("✉️ External Organization Event Request Form")
+    st.subheader("✉️ Internal & External Career Event Request Form")
 
     with st.form("external_request_form"):
         col_req1, col_req2 = st.columns(2)
