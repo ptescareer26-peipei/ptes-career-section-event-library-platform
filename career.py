@@ -134,7 +134,7 @@ st.markdown("""
 # ==========================================
 with st.sidebar:
     try:
-        logo = Image.open('ptes_logo.png')
+        logo = Image.open('ptes_logo.PNG')
         st.image(logo, use_container_width=True)
     except Exception:
         st.info("Logo image 'ptes_logo.png' optional.")
