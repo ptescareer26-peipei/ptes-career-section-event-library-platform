@@ -11,8 +11,8 @@ from PIL import Image
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 
-# Google API client libraries for Drive uploads
-from google.oauth2 import service_account
+# Google API Client & OAuth Credentials
+from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 
@@ -27,7 +27,7 @@ GDRIVE_FOLDER_ID = "1yFdDBqKb73uM3lcCWmvl9AJr5ETVnrWc"
 # Default Admin WhatsApp Contact
 ADMIN_WA_NUMBER = "6737318186"
 
-# Database Columns Schema
+# Database Columns Schema (Strictly Columns A through K)
 DB_COLUMNS = [
     "Event ID", 
     "Date", 
@@ -47,15 +47,12 @@ DB_COLUMNS = [
 # ==========================================
 custom_css = """
 <style>
-    /* Main Background & Sidebar Styling */
     .stApp, .stAppViewContainer, [data-testid="stHeader"] {
         background-color: #E5C2F5 !important;
     }
     [data-testid="stSidebar"] {
         background-color: #FAE48F !important;
     }
-
-    /* Header Container Styling */
     .header-container {
         background-color: #D4FA8F;
         padding: 20px;
@@ -69,8 +66,6 @@ custom_css = """
         font-weight: 800;
         margin-bottom: 5px;
     }
-
-    /* Form Container & Block Styling */
     div[data-testid="stForm"] {
         background-color: #FDE7FE !important;
         padding: 20px !important;
@@ -81,15 +76,11 @@ custom_css = """
         border-radius: 12px !important;
         padding: 10px !important;
     }
-
-    /* Target Widget Labels */
     div[data-testid="stWidgetLabel"] p {
         font-size: 12pt !important;
         font-weight: bold !important;
         color: #111111 !important;
     }
-
-    /* Tab Title Bolding */
     button[data-baseweb="tab"],
     button[data-baseweb="tab"] *,
     [data-testid="stTab"],
@@ -97,7 +88,6 @@ custom_css = """
         font-weight: 900 !important;
         font-size: 13pt !important;
     }
-    
     button[data-baseweb="tab"] {
         background-color: rgba(255, 255, 255, 0.4) !important;
         border-radius: 8px 8px 0px 0px !important;
@@ -115,13 +105,17 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 def upload_multiple_pdfs_to_drive(uploaded_file_list, generated_event_id):
     """
-    Uploads PDF files to Google Drive folder using Service Account credentials.
-    Uses supportsAllDrives=True to handle shared folder upload authorizations.
+    Uploads PDF files to Google Drive folder using User OAuth credentials.
+    Uses personal Gmail account quota (15 GB) to bypass 0-byte Service Account quota limits.
     """
     uploaded_links = []
     try:
-        creds = service_account.Credentials.from_service_account_info(
-            st.secrets["gcp_service_account"],
+        creds = Credentials(
+            token=None,
+            refresh_token=st.secrets["gcp_oauth"]["refresh_token"],
+            client_id=st.secrets["gcp_oauth"]["client_id"],
+            client_secret=st.secrets["gcp_oauth"]["client_secret"],
+            token_uri="https://oauth2.googleapis.com/token",
             scopes=["https://www.googleapis.com/auth/drive"]
         )
         service = build("drive", "v3", credentials=creds)
@@ -140,12 +134,10 @@ def upload_multiple_pdfs_to_drive(uploaded_file_list, generated_event_id):
                 resumable=True
             )
 
-            # Upload file with supportsAllDrives parameter
             drive_file = service.files().create(
                 body=file_metadata,
                 media_body=media,
-                fields="id, webViewLink",
-                supportsAllDrives=True
+                fields="id, webViewLink"
             ).execute()
 
             file_id = drive_file.get("id")
@@ -154,8 +146,7 @@ def upload_multiple_pdfs_to_drive(uploaded_file_list, generated_event_id):
             permission = {"type": "anyone", "role": "reader"}
             service.permissions().create(
                 fileId=file_id, 
-                body=permission,
-                supportsAllDrives=True
+                body=permission
             ).execute()
 
             uploaded_links.append(drive_file.get("webViewLink"))
@@ -240,7 +231,7 @@ with st.sidebar:
         logo = Image.open('ptes_logo.PNG')
         st.image(logo, width='stretch')
     except Exception:
-        st.info("Logo image 'ptes_logo.PNG' optional.")
+        st.info("Logo image optional.")
 
     st.header("⚙️ Admin Management")
     admin_password = st.text_input("Enter Admin Password", type="password", key="sidebar_password")
@@ -260,10 +251,7 @@ with st.sidebar:
             if st.button("Delete Event"):
                 selected_id = selected_event_label.split("]")[0].replace("[", "")
                 updated_df = master_data[master_data['Event ID'] != selected_id].reindex(columns=DB_COLUMNS)
-                conn.update(
-                    spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"],
-                    data=updated_df
-                )
+                conn.update(data=updated_df)
                 st.cache_data.clear()
                 st.success(f"Event `{selected_id}` cancelled successfully. Reason: {cancel_reason}")
                 st.rerun()
@@ -298,11 +286,12 @@ with tab1:
         if 'selected_calendar_day' not in st.session_state:
             st.session_state.selected_calendar_day = datetime.today().day
 
+        # Filter events using a temporary Series to prevent extra columns in Google Sheets
         if not master_data.empty:
-            master_data['datetime_obj'] = pd.to_datetime(master_data['Date'], format='%d/%m/%Y', errors='coerce')
+            temp_dates = pd.to_datetime(master_data['Date'], format='%d/%m/%Y', errors='coerce')
             month_events = master_data[
-                (master_data['datetime_obj'].dt.month == selected_month) &
-                (master_data['datetime_obj'].dt.year == selected_year)
+                (temp_dates.dt.month == selected_month) &
+                (temp_dates.dt.year == selected_year)
             ]
         else:
             month_events = pd.DataFrame()
@@ -465,10 +454,10 @@ with tab3:
             if st.button("✅ Approve & Change Status to Officially Confirmed", type="primary"):
                 target_id = selected_to_approve.split("]")[0].replace("[", "")
                 master_data.loc[master_data['Event ID'] == target_id, 'Status'] = "Officially Confirmed"
-                conn.update(
-                    spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"],
-                    data=master_data
-                )
+                
+                # Re-index strictly to DB_COLUMNS before writing back to Google Sheets
+                clean_df = master_data.reindex(columns=DB_COLUMNS)
+                conn.update(data=clean_df)
                 st.cache_data.clear()
                 st.balloons()
                 st.success(f"🎉 Event `{target_id}` status successfully updated to **Officially Confirmed**!")
@@ -529,7 +518,7 @@ with tab4:
             
             yy = proposed_date.strftime("%y")
             mm = proposed_date.strftime("%m")
-            events_same_day = master_data[master_data['Date'] == formatted_prop_date]
+            events_same_day = master_data[master_data['Date'] == formatted_prop_date] if not master_data.empty else pd.DataFrame()
             seq_num = f"{(len(events_same_day) + 1):02d}"
             generated_event_id = f"CS-{yy}-{mm}-{seq_num}"
 
@@ -554,13 +543,9 @@ with tab4:
                 "Status": "Pending Approval"
             }])[DB_COLUMNS]
 
-            updated_master = pd.concat([master_data, new_request_row], ignore_index=True)
+            updated_master = pd.concat([master_data, new_request_row], ignore_index=True).reindex(columns=DB_COLUMNS)
             
-            # Explicit update call passing spreadsheet reference
-            conn.update(
-                spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"],
-                data=updated_master
-            )
+            conn.update(data=updated_master)
             st.cache_data.clear()
 
             st.success(f"✅ Request submitted successfully! Your Event ID is **{generated_event_id}**. Use this ID in Tab 2 to check approval status.")
