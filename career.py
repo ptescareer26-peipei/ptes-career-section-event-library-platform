@@ -1,3 +1,4 @@
+import io
 import streamlit as st
 import pandas as pd
 from PIL import Image
@@ -9,11 +10,22 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+# Google API client libraries for Drive uploads
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
+
 # ==========================================
-# PAGE CONFIGURATION & STYLING
+# PAGE CONFIGURATION & GOOGLE DRIVE SETTINGS
 # ==========================================
 st.set_page_config(page_title="PTES Career Section Portal", layout="wide")
 
+# ⚠️ REPLACE THIS WITH YOUR ACTUAL GOOGLE DRIVE FOLDER ID
+GDRIVE_FOLDER_ID = "YOUR_GOOGLE_DRIVE_FOLDER_ID_HERE"
+
+# ==========================================
+# STYLING (GLOBAL CSS)
+# ==========================================
 custom_css = """
 <style>
     /* Main Background & Sidebar Styling */
@@ -51,18 +63,14 @@ custom_css = """
         padding: 10px !important;
     }
 
-    /* -------------------------------------------------- */
-    /* ALL FORM LABELS STYLING: BOLD & 12PT FONT          */
-    /* -------------------------------------------------- */
+    /* Target Widget Labels */
     div[data-testid="stWidgetLabel"] p {
         font-size: 12pt !important;
         font-weight: bold !important;
         color: #111111 !important;
     }
 
-    /* -------------------------------------------------- */
-    /* TAB TITLE STYLING: BOLD FONT                       */
-    /* -------------------------------------------------- */
+    /* Tab Title Bolding */
     button[data-baseweb="tab"],
     button[data-baseweb="tab"] *,
     [data-testid="stTab"],
@@ -82,11 +90,11 @@ custom_css = """
 st.markdown(custom_css, unsafe_allow_html=True)
 
 # ==========================================
-# DATABASE SCHEMA & CONNECTION
+# DATABASE SCHEMA & GOOGLE DRIVE FUNCTIONS
 # ==========================================
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-ADMIN_WA_NUMBER = "6738825223"
+ADMIN_WA_NUMBER = "6737318186"
 DB_COLUMNS = [
     "Event ID", 
     "Date", 
@@ -100,6 +108,56 @@ DB_COLUMNS = [
     "Materials_Link", 
     "Status"
 ]
+
+def upload_multiple_pdfs_to_drive(uploaded_file_list, generated_event_id):
+    """
+    Uploads a list of PDF files to Google Drive, automatically renaming each file
+    to match the Event ID (e.g., CS-26-08-01_Doc1.pdf).
+    Returns a comma-separated string of shareable viewer links.
+    """
+    uploaded_links = []
+    try:
+        # Load Google Service Account credentials from secrets
+        creds = service_account.Credentials.from_service_account_info(
+            st.secrets["gcp_service_account"],
+            scopes=["https://www.googleapis.com/auth/drive"]
+        )
+        service = build("drive", "v3", credentials=creds)
+
+        for index, pdf_file in enumerate(uploaded_file_list, start=1):
+            # Dynamic renaming rule
+            renamed_title = f"{generated_event_id}_Doc{index}.pdf"
+
+            file_metadata = {
+                "name": renamed_title,
+                "parents": [GDRIVE_FOLDER_ID]
+            }
+
+            media = MediaIoBaseUpload(
+                io.BytesIO(pdf_file.getvalue()),
+                mimetype="application/pdf",
+                resumable=True
+            )
+
+            # Upload to Google Drive
+            drive_file = service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields="id, webViewLink"
+            ).execute()
+
+            file_id = drive_file.get("id")
+
+            # Enable public viewer access for Streamlit iframe previewing
+            permission = {"type": "anyone", "role": "reader"}
+            service.permissions().create(fileId=file_id, body=permission).execute()
+
+            uploaded_links.append(drive_file.get("webViewLink"))
+
+        return ", ".join(uploaded_links)
+    except Exception as e:
+        st.error(f"Error uploading PDF documents to Google Drive: {e}")
+        return ""
 
 def send_admin_email(details):
     try:
@@ -349,7 +407,6 @@ with tab3:
     st.subheader("📤 Pending Events Dashboard & Authorizations")
     st.markdown("This dashboard lists all events requiring attention that are currently in **Pending Approval** status.")
 
-    # 1. Display Pending Events List (Visible to all users and admin)
     if not master_data.empty:
         pending_events_df = master_data[master_data['Status'] == "Pending Approval"]
     else:
@@ -370,13 +427,11 @@ with tab3:
 
     st.divider()
 
-    # 2. Password-Protected Admin Authorization Panel
     st.markdown("### 🔐 Admin Authorization Panel")
     st.caption("Enter the admin password below to unlock status changing capabilities.")
     
     tab3_password_input = st.text_input("Enter Password for Approval Actions", type="password", key="tab3_pwd")
 
-    # Verify authorization via tab 3 input or sidebar password
     is_authorized = (
         (target_password and tab3_password_input == target_password) or 
         (target_password and admin_password == target_password)
@@ -385,7 +440,6 @@ with tab3:
     if is_authorized:
         st.success("🔓 Admin Authorization Granted!")
 
-        # Explicit reminder callout for FM Portal venue booking
         st.warning("""
         **⚠️ IMPORTANT REMINDER FOR ADMIN:**  
         Before approving any event below, please ensure you **book the venue using the FM portal** (available from the FM Admin) and verify there are **NO CLASHES** of date and time with existing venue usage!
@@ -412,45 +466,53 @@ with tab3:
         st.info("🔒 Enter password above to access venue confirmation and status change tools.")
 
 # ==========================================
-# TAB 4: EXTERNAL REQUESTS WITH DOCUMENTS & NOTIFICATION OPTIONS
+# TAB 4: EXTERNAL REQUESTS WITH PDF UPLOADS
 # ==========================================
 with tab4:
-    st.subheader("✉️ Internal & External Career Event Request Form")
+    st.subheader("✉️ External Organization Event Request Form")
 
-    with st.form("external_request_form"):
-        col_req1, col_req2 = st.columns(2)
-        
-        with col_req1:
-            title_req = st.text_input("Proposed Event Title")
-            org_name = st.text_input("Organization / Company Name")
-            facilitator_req = st.text_input("Facilitator Name")
-            contact_no_req = st.text_input("Contact Phone Number")
-            contact_email = st.text_input("Contact Email")
+    # Outside form to allow file selection prior to form submit
+    col_req1, col_req2 = st.columns(2)
+    
+    with col_req1:
+        title_req = st.text_input("Proposed Event Title")
+        org_name = st.text_input("Organization / Company Name")
+        facilitator_req = st.text_input("Facilitator Name")
+        contact_no_req = st.text_input("Contact Phone Number")
+        contact_email = st.text_input("Contact Email")
 
-        with col_req2:
-            proposed_date = st.date_input("Proposed Event Date", min_value=datetime.today())
-            time_slot_req = st.selectbox("Preferred Time Slot", ["08:00 - 10:00", "10:30 - 12:30", "14:00 - 16:30", "Whole Day"])
-            venue_req = st.selectbox("Preferred Venue", [
-                "Lecture Theatre 2 [100 - Level 3]",
-                "Lecture Theatre 1 [100 pax- Level 2]",
-                "Multi-Media Theatre [200 pax - Level 2]",
-                "MPH Multi-Purpose Hall [750 pax-A building]"
-            ])
-            target_aud_req = st.multiselect("Target Audience", [
-                "Lower 6th",
-                "Upper 6th",
-                "PTES Staff",
-                "PIBG or Parents",
-                "other Association (Public)"
-            ])
-            materials_link_req = st.text_input("Upload Materials Link (Google Drive / Document Link)")
+    with col_req2:
+        proposed_date = st.date_input("Proposed Event Date", min_value=datetime.today())
+        time_slot_req = st.selectbox("Preferred Time Slot", ["08:00 - 10:00", "10:30 - 12:30", "14:00 - 16:30", "Whole Day"])
+        venue_req = st.selectbox("Preferred Venue", [
+            "Lecture Theatre 2 [100 - Level 3]",
+            "Lecture Theatre 1 [100 pax- Level 2]",
+            "Multi-Media Theatre [200 pax - Level 2]",
+            "MPH Multi-Purpose Hall [750 pax-A building]"
+        ])
+        target_aud_req = st.multiselect("Target Audience", [
+            "Lower 6th",
+            "Upper 6th",
+            "PTES Staff",
+            "PIBG or Parents",
+            "other Association (Public)"
+        ])
 
-        event_proposal = st.text_area("Event Purpose & Proposal Details")
-        notify_method = st.radio("Send Notification to Admin via:", ["WhatsApp Link", "Automated Email", "Both"], horizontal=True)
+    # PDF File Uploader (Strict PDF restriction, supports multiple files)
+    uploaded_pdfs = st.file_uploader(
+        "Upload Proposal & Supporting Documents (PDF Format Only)",
+        type=["pdf"],
+        accept_multiple_files=True,
+        help="If your document is an image, please convert it to PDF before uploading."
+    )
 
-        submit_req = st.form_submit_button("Submit Event Request")
+    if uploaded_pdfs:
+        st.info(f"📎 {len(uploaded_pdfs)} PDF file(s) attached and ready for upload.")
 
-    if submit_req:
+    event_proposal = st.text_area("Event Purpose & Proposal Details")
+    notify_method = st.radio("Send Notification to Admin via:", ["WhatsApp Link", "Automated Email", "Both"], horizontal=True)
+
+    if st.button("Submit Event Request", type="primary"):
         if org_name and contact_email and title_req and facilitator_req and contact_no_req:
             formatted_prop_date = proposed_date.strftime("%d/%m/%Y")
             
@@ -459,6 +521,12 @@ with tab4:
             events_same_day = master_data[master_data['Date'] == formatted_prop_date]
             seq_num = f"{(len(events_same_day) + 1):02d}"
             generated_event_id = f"CS-{yy}-{mm}-{seq_num}"
+
+            # Process PDF Uploads if attached
+            materials_link_req = ""
+            if uploaded_pdfs:
+                with st.spinner("Uploading PDF documents to Google Drive..."):
+                    materials_link_req = upload_multiple_pdfs_to_drive(uploaded_pdfs, generated_event_id)
 
             audience_str = ", ".join(target_aud_req)
 
