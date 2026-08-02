@@ -86,7 +86,7 @@ st.markdown(custom_css, unsafe_allow_html=True)
 # ==========================================
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-ADMIN_WA_NUMBER = "6737318186"
+ADMIN_WA_NUMBER = "6738825223"
 DB_COLUMNS = [
     "Event ID", 
     "Date", 
