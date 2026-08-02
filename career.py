@@ -485,10 +485,11 @@ with tab4:
         proposed_date = st.date_input("Proposed Event Date", min_value=datetime.today())
         time_slot_req = st.selectbox("Preferred Time Slot", ["08:00 - 10:00", "10:30 - 12:30", "14:00 - 16:30", "Whole Day"])
         venue_req = st.selectbox("Preferred Venue", [
-            "Lecture Theatre 2 [100 - Level 3]",
-            "Lecture Theatre 1 [100 pax- Level 2]",
-            "Multi-Media Theatre [200 pax - Level 2]",
-            "MPH Multi-Purpose Hall [750 pax-A building]"
+            "Lecture Theatre Two  [100 pax - Level 3]",
+            "Lecture Theatre One  [100 pax - Level 2]",
+            "Multi-Media Theatre  [270 pax - Level 2]",
+            "PTES Conference Room [ 30 pax - Level 2]",
+            "PTES Multi-Purpose Hall [780 pax-A building]"
         ])
         target_aud_req = st.multiselect("Target Audience", [
             "Lower 6th",
