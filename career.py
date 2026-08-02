@@ -54,7 +54,7 @@ custom_css = """
     }
 
     /* -------------------------------------------------- */
-    /* 1. TAB STYLING: BOLD AND 13PT FONT SIZE           */
+    /* TAB STYLING: BOLD AND 13PT FONT SIZE              */
     /* -------------------------------------------------- */
     button[data-baseweb="tab"] p {
         font-size: 13pt !important;
@@ -73,28 +73,31 @@ custom_css = """
     }
 
     /* -------------------------------------------------- */
-    /* 2. INPUT BARS & CONTAINERS: BLACK BORDERS         */
+    /* UNIVERSAL BLACK BORDER FOR ALL INPUT WIDGETS      */
     /* -------------------------------------------------- */
-    /* Text Inputs, Date Inputs, and Text Areas */
-    div[data-baseweb="input"] > div, 
-    div[data-baseweb="textarea"] > div {
+    /* Targets BaseWeb Input Containers, Selectboxes, & Textareas */
+    div[data-baseweb="base-input"],
+    div[data-baseweb="input"],
+    div[data-baseweb="select"] > div,
+    div[data-testid="stTextArea"] textarea {
         border: 2px solid #000000 !important;
         border-radius: 8px !important;
         background-color: #FFFFFF !important;
     }
 
-    /* Dropdown / Select Boxes */
-    div[data-baseweb="select"] > div {
-        border: 2px solid #000000 !important;
-        border-radius: 8px !important;
-        background-color: #FFFFFF !important;
+    /* Ensures inner input text boxes fit cleanly inside the outer container */
+    div[data-baseweb="base-input"] input,
+    div[data-baseweb="input"] input {
+        border: none !important;
+        background-color: transparent !important;
     }
 
-    /* Focused State for Input Elements */
-    div[data-baseweb="input"]:focus-within > div,
-    div[data-baseweb="textarea"]:focus-within > div,
-    div[data-baseweb="select"]:focus-within > div {
-        border-color: #111111 !important;
+    /* Active / Focus styling for all input bars */
+    div[data-baseweb="base-input"]:focus-within,
+    div[data-baseweb="input"]:focus-within,
+    div[data-baseweb="select"]:focus-within > div,
+    div[data-testid="stTextArea"] textarea:focus {
+        border-color: #000000 !important;
         box-shadow: 0 0 0 1px #000000 !important;
     }
 </style>
@@ -186,10 +189,11 @@ st.markdown("""
 # ==========================================
 with st.sidebar:
     try:
+        # File extension updated to UPPERCASE .PNG
         logo = Image.open('ptes_logo.PNG')
         st.image(logo, use_container_width=True)
     except Exception:
-        st.info("Logo image 'ptes_logo.png' optional.")
+        st.info("Logo image 'ptes_logo.PNG' optional.")
 
     st.header("⚙️ Admin Management")
     admin_password = st.text_input("Enter Admin Password", type="password")
