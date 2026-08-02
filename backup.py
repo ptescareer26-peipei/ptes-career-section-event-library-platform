@@ -52,6 +52,15 @@ custom_css = """
     }
 
     /* -------------------------------------------------- */
+    /* ALL FORM LABELS STYLING: BOLD & 12PT FONT          */
+    /* -------------------------------------------------- */
+    div[data-testid="stWidgetLabel"] p {
+        font-size: 12pt !important;
+        font-weight: bold !important;
+        color: #111111 !important;
+    }
+
+    /* -------------------------------------------------- */
     /* TAB TITLE STYLING: BOLD FONT                       */
     /* -------------------------------------------------- */
     button[data-baseweb="tab"],
@@ -77,7 +86,7 @@ st.markdown(custom_css, unsafe_allow_html=True)
 # ==========================================
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-ADMIN_WA_NUMBER = "6737318186"
+ADMIN_WA_NUMBER = "6738825223"
 DB_COLUMNS = [
     "Event ID", 
     "Date", 
@@ -406,7 +415,7 @@ with tab3:
 # TAB 4: EXTERNAL REQUESTS WITH DOCUMENTS & NOTIFICATION OPTIONS
 # ==========================================
 with tab4:
-    st.subheader("✉️ External Organization Event Request Form")
+    st.subheader("✉️ Internal & External Career Event Request Form")
 
     with st.form("external_request_form"):
         col_req1, col_req2 = st.columns(2)
