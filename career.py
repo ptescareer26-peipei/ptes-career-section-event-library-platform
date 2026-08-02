@@ -1,4 +1,5 @@
 import io
+import re
 import calendar
 import smtplib
 import urllib.parse
@@ -103,26 +104,62 @@ st.markdown(custom_css, unsafe_allow_html=True)
 # ==========================================
 conn = st.connection("gsheets", type=GSheetsConnection)
 
+def get_drive_service():
+    """Builds and returns Google Drive API service client using User OAuth credentials."""
+    if "gcp_oauth" not in st.secrets:
+        return None
+    creds = Credentials(
+        token=None,
+        refresh_token=st.secrets["gcp_oauth"]["refresh_token"],
+        client_id=st.secrets["gcp_oauth"]["client_id"],
+        client_secret=st.secrets["gcp_oauth"]["client_secret"],
+        token_uri="https://oauth2.googleapis.com/token",
+        scopes=["https://www.googleapis.com/auth/drive"]
+    )
+    return build("drive", "v3", credentials=creds)
+
+def list_drive_files_from_folder():
+    """Fetches list of all files directly inside the Google Drive target folder."""
+    try:
+        service = get_drive_service()
+        if not service:
+            return []
+        
+        query = f"'{GDRIVE_FOLDER_ID}' in parents and trashed = false"
+        results = service.files().list(
+            q=query,
+            fields="files(id, name, webViewLink, createdTime)",
+            orderBy="createdTime desc"
+        ).execute()
+        
+        return results.get("files", [])
+    except Exception as e:
+        st.error(f"Error fetching files from Google Drive: {e}")
+        return []
+
+def delete_single_drive_file(file_id):
+    """Deletes a single file directly from Google Drive by File ID."""
+    try:
+        service = get_drive_service()
+        if not service:
+            return False, "Missing Google Drive API credentials."
+        
+        service.files().delete(fileId=file_id).execute()
+        return True, "File permanently deleted from Google Drive."
+    except Exception as e:
+        return False, f"Error deleting file from Google Drive: {e}"
+
 def upload_multiple_pdfs_to_drive(uploaded_file_list, generated_event_id):
-    """Uploads PDF files to Google Drive folder using User OAuth credentials."""
+    """Uploads PDF files to Google Drive folder using OAuth credentials."""
     if not uploaded_file_list:
         return "0 File(s)"
 
     uploaded_links = []
     try:
-        if "gcp_oauth" not in st.secrets:
-            st.error("⚠️ Streamlit secrets missing [gcp_oauth] key! Please check your secrets configuration.")
+        service = get_drive_service()
+        if not service:
+            st.error("⚠️ Streamlit secrets missing [gcp_oauth] key!")
             return "0 File(s) [Error: Missing Secrets]"
-
-        creds = Credentials(
-            token=None,
-            refresh_token=st.secrets["gcp_oauth"]["refresh_token"],
-            client_id=st.secrets["gcp_oauth"]["client_id"],
-            client_secret=st.secrets["gcp_oauth"]["client_secret"],
-            token_uri="https://oauth2.googleapis.com/token",
-            scopes=["https://www.googleapis.com/auth/drive"]
-        )
-        service = build("drive", "v3", credentials=creds)
 
         for index, pdf_file in enumerate(uploaded_file_list, start=1):
             renamed_title = f"{generated_event_id}_Doc{index}.pdf"
@@ -158,6 +195,33 @@ def upload_multiple_pdfs_to_drive(uploaded_file_list, generated_event_id):
     except Exception as e:
         st.error(f"Error uploading PDF documents to Google Drive: {e}")
         return "0 File(s) [Upload Failed]"
+
+def delete_files_from_drive(materials_link_str):
+    """Extracts Drive File IDs from links and permanently deletes them from Google Drive."""
+    if not materials_link_str or "0 File(s)" in materials_link_str:
+        return 0, "No attached files to delete."
+
+    try:
+        service = get_drive_service()
+        if not service:
+            return 0, "Missing Drive API credentials."
+
+        urls = [link.strip() for link in str(materials_link_str).split(",") if link.strip().startswith("http")]
+        deleted_count = 0
+
+        for url in urls:
+            match = re.search(r'/d/([a-zA-Z0-9_-]+)', url) or re.search(r'id=([a-zA-Z0-9_-]+)', url)
+            if match:
+                file_id = match.group(1)
+                try:
+                    service.files().delete(fileId=file_id).execute()
+                    deleted_count += 1
+                except Exception as file_err:
+                    st.warning(f"Could not delete Drive file ID {file_id}: {file_err}")
+
+        return deleted_count, f"Successfully deleted {deleted_count} file(s) from Google Drive."
+    except Exception as e:
+        return 0, f"Error deleting files from Google Drive: {e}"
 
 def send_admin_email(details):
     """Sends an automated HTML notification email to the admin Outlook address."""
@@ -202,16 +266,15 @@ def send_admin_email(details):
 
 # Read Data safely from Google Sheets
 try:
-    master_data = conn.read(ttl=0)  # ttl=0 forces fresh read from sheet
+    master_data = conn.read(ttl=0)
     if master_data is None or master_data.empty:
         master_data = pd.DataFrame(columns=DB_COLUMNS)
     else:
-        # Clean and retain standard schema
         master_data = master_data.dropna(how="all").reindex(columns=DB_COLUMNS)
 except Exception:
     master_data = pd.DataFrame(columns=DB_COLUMNS)
 
-# Retrieve Admin Password safely from Streamlit secrets (defaults to "admin123" if omitted)
+# Retrieve Admin Password safely from Streamlit secrets
 try:
     target_password = st.secrets.get("admin_password", "admin123")
 except Exception:
@@ -244,7 +307,6 @@ with st.sidebar:
         st.success("✅ Admin Access Active")
         st.divider()
 
-        # Display persistent success message after event deletion rerun
         if "delete_success_msg" in st.session_state:
             st.warning(st.session_state.delete_success_msg)
             del st.session_state.delete_success_msg
@@ -252,7 +314,6 @@ with st.sidebar:
         st.subheader("🗑️ Delete / Cancel Event")
         
         if not master_data.empty:
-            # Map each dropdown option directly to its exact row index
             event_options = {}
             for idx, row in master_data.iterrows():
                 label = f"[{row['Event ID']}] {row['Title']} ({row['Date']})"
@@ -261,23 +322,24 @@ with st.sidebar:
             selected_event_label = st.selectbox("Select Event to Cancel", list(event_options.keys()))
             cancel_reason = st.text_area("Reason for Cancellation")
 
-            if st.button("Delete Event", type="primary"):
+            if st.button("Delete Event & Files", type="primary"):
                 target_idx = event_options[selected_event_label]
                 deleted_id = master_data.loc[target_idx, 'Event ID']
                 deleted_title = master_data.loc[target_idx, 'Title']
+                materials_link_val = master_data.loc[target_idx, 'Materials_Link']
 
-                # 1. Visual spinner during sheet sync
-                with st.spinner(f"Deleting Event ID [{deleted_id}] from Google Sheets... Please wait."):
-                    # Drop EXACT row index only to prevent wiping other rows
-                    updated_df = master_data.drop(index=target_idx).reset_index(drop=True).reindex(columns=DB_COLUMNS)
+                with st.spinner(f"Deleting files from Google Drive and removing Event [{deleted_id}]... Please wait."):
+                    count_deleted, drive_msg = delete_files_from_drive(materials_link_val)
                     
+                    updated_df = master_data.drop(index=target_idx).reset_index(drop=True).reindex(columns=DB_COLUMNS)
                     conn.update(data=updated_df)
                     st.cache_data.clear()
 
-                # 2. Store persistent deletion confirmation message in Session State
-                st.session_state.delete_success_msg = f"🗑️ **DELETED!** Event ID **[{deleted_id}] - {deleted_title}** has been removed from Google Sheets."
+                st.session_state.delete_success_msg = (
+                    f"🗑️ **DELETED!** Event ID **[{deleted_id}] - {deleted_title}** has been removed.\n\n"
+                    f"📄 **Drive Cleanup:** {drive_msg}"
+                )
 
-                # 3. Trigger app refresh
                 st.rerun()
         else:
             st.info("No events in database to delete.")
@@ -289,7 +351,7 @@ with st.sidebar:
 # ==========================================
 tab1, tab2, tab3, tab4 = st.tabs([
     "📅 Event Calendar", 
-    "🔍 Information Preview", 
+    "🔍 Information Preview & File Manager", 
     "📤 Pending Approvals & Venues", 
     "✉️ New Request"
 ])
@@ -374,60 +436,149 @@ with tab1:
         st.info("No events scheduled for this month.")
 
 # ==========================================
-# TAB 2: EXTRACT MATERIALS & CHECK STATUS BY EVENT ID
+# TAB 2: EXTRACT MATERIALS & DIRECT DRIVE FILE MANAGER
 # ==========================================
 with tab2:
-    st.subheader("🔍 Extract Documents & Check Confirmation Status")
+    st.subheader("🔍 Extract Documents & Google Drive File Manager")
 
-    search_id = st.text_input("Enter Event ID (e.g., CS-26-08-01):", placeholder="CS-26-08-01").strip()
+    # Persistent alert message display
+    if "drive_tab_msg" in st.session_state:
+        st.success(st.session_state.drive_tab_msg)
+        del st.session_state.drive_tab_msg
 
-    if search_id and not master_data.empty:
-        matched_event = master_data[master_data['Event ID'].astype(str).str.contains(search_id, case=False, na=False)]
+    mode = st.radio(
+        "Choose Search Method:", 
+        ["1. Lookup by Event ID (Google Sheets)", "2. Browse Google Drive Folder directly (by Date / Event ID)"],
+        horizontal=True
+    )
 
-        if not matched_event.empty:
-            for _, row in matched_event.iterrows():
-                st.markdown(f"### 📌 Event: **{row['Title']}** (`{row['Event ID']}`)")
-                
-                if row['Status'] == "Officially Confirmed":
-                    st.success(f"✅ Status: **{row['Status']}**")
-                else:
-                    st.warning(f"⏳ Status: **{row['Status']}** (Awaiting PTES Admin Confirmation)")
+    st.divider()
 
-                raw_link_val = str(row['Materials_Link']) if pd.notnull(row['Materials_Link']) else ""
-                
-                if raw_link_val and "0 File(s)" not in raw_link_val:
-                    doc_links = [link.strip() for link in raw_link_val.split(",") if link.strip().startswith("http")]
-                else:
-                    doc_links = []
+    if mode.startswith("1."):
+        search_id = st.text_input("Enter Event ID (e.g., CS-26-08-01):", placeholder="CS-26-08-01").strip()
 
-                if doc_links:
-                    st.write(f"📎 Found **{len(doc_links)}** document(s) attached:")
+        if search_id and not master_data.empty:
+            matched_event = master_data[master_data['Event ID'].astype(str).str.contains(search_id, case=False, na=False)]
 
-                    doc_options = [f"Document {i+1}: {doc_links[i][:50]}..." for i in range(len(doc_links))]
-                    selected_doc_label = st.radio("Select a document to preview:", doc_options)
-                    selected_index = doc_options.index(selected_doc_label)
-                    active_url = doc_links[selected_index]
+            if not matched_event.empty:
+                for idx, row in matched_event.iterrows():
+                    st.markdown(f"### 📌 Event: **{row['Title']}** (`{row['Event ID']}`)")
+                    
+                    if row['Status'] == "Officially Confirmed":
+                        st.success(f"✅ Status: **{row['Status']}**")
+                    else:
+                        st.warning(f"⏳ Status: **{row['Status']}** (Awaiting PTES Admin Confirmation)")
 
-                    col_prev, col_btn = st.columns([3, 1])
+                    raw_link_val = str(row['Materials_Link']) if pd.notnull(row['Materials_Link']) else ""
+                    
+                    if raw_link_val and "0 File(s)" not in raw_link_val:
+                        doc_links = [link.strip() for link in raw_link_val.split(",") if link.strip().startswith("http")]
+                    else:
+                        doc_links = []
 
-                    with col_prev:
-                        st.markdown("**📄 On-Screen Preview:**")
-                        if "drive.google.com" in active_url and "/view" in active_url:
-                            preview_url = active_url.replace("/view", "/preview")
-                        else:
-                            preview_url = active_url
-                        
-                        st.components.v1.iframe(preview_url, height=500, scrolling=True)
+                    if doc_links:
+                        st.write(f"📎 Found **{len(doc_links)}** document(s) attached:")
 
-                    with col_btn:
-                        st.markdown("**💾 Save / Hard Copy:**")
-                        st.markdown(f'<a href="{active_url}" target="_blank"><button style="background-color:#10B981; color:white; padding:10px 20px; border:none; border-radius:5px; font-weight:bold; cursor:pointer;">⬇️ DOWNLOAD / OPEN</button></a>', unsafe_allow_html=True)
-                else:
-                    st.info(f"ℹ️ No documents uploaded for Event ID `{row['Event ID']}` (Count: 0).")
+                        doc_options = [f"Document {i+1}: {doc_links[i][:50]}..." for i in range(len(doc_links))]
+                        selected_doc_label = st.radio("Select a document to preview:", doc_options)
+                        selected_index = doc_options.index(selected_doc_label)
+                        active_url = doc_links[selected_index]
+
+                        col_prev, col_btn = st.columns([3, 1])
+
+                        with col_prev:
+                            st.markdown("**📄 On-Screen Preview:**")
+                            if "drive.google.com" in active_url and "/view" in active_url:
+                                preview_url = active_url.replace("/view", "/preview")
+                            else:
+                                preview_url = active_url
+                            
+                            st.components.v1.iframe(preview_url, height=500, scrolling=True)
+
+                        with col_btn:
+                            st.markdown("**💾 Save / Hard Copy:**")
+                            st.markdown(f'<a href="{active_url}" target="_blank"><button style="background-color:#10B981; color:white; padding:10px 20px; border:none; border-radius:5px; font-weight:bold; cursor:pointer;">⬇️ DOWNLOAD / OPEN</button></a>', unsafe_allow_html=True)
+                    else:
+                        st.info(f"ℹ️ No documents uploaded for Event ID `{row['Event ID']}` (Count: 0).")
+            else:
+                st.error(f"No event found matching Event ID '{search_id}'.")
+        elif search_id:
+            st.info("Database is empty.")
+
+    else:
+        st.markdown("### 📁 Direct Google Drive File Browser")
+        st.caption("Browse and manage PDF files stored in Google Drive, even if event records were removed from Google Sheets.")
+
+        # Step 1: Select Date Filter
+        col_d1, col_d2 = st.columns(2)
+        with col_d1:
+            selected_drive_date = st.date_input("🗓️ 1. Select Date Filter", datetime.today())
+            filter_formatted_date = selected_drive_date.strftime("%d/%m/%Y")
+            yy_mm_str = f"{selected_drive_date.strftime('%y')}-{selected_drive_date.strftime('%m')}"
+
+        with st.spinner("Fetching files directly from Google Drive folder..."):
+            all_drive_files = list_drive_files_from_folder()
+
+        if all_drive_files:
+            # Match files created on that date or matching the CS-YY-MM prefix
+            matching_files = [
+                f for f in all_drive_files 
+                if yy_mm_str in f['name'] or 
+                datetime.strptime(f['createdTime'][:10], '%Y-%m-%d').date() == selected_drive_date
+            ]
+
+            st.write(f"Found **{len(matching_files)}** file(s) for date **{filter_formatted_date}** (or Event pattern `CS-{yy_mm_str}`):")
+
+            if matching_files:
+                with col_d2:
+                    # Step 2: Select Event / File
+                    file_options = {f"{f['name']} (Uploaded: {f['createdTime'][:10]})": f for f in matching_files}
+                    selected_file_label = st.selectbox("📄 2. Select Document to View / Delete", list(file_options.keys()))
+
+                chosen_file = file_options[selected_file_label]
+                chosen_file_id = chosen_file['id']
+                chosen_file_name = chosen_file['name']
+                file_web_link = chosen_file.get('webViewLink', '')
+
+                st.divider()
+                st.markdown(f"#### 📄 Document Preview: `{chosen_file_name}`")
+
+                col_preview, col_actions = st.columns([3, 2])
+
+                with col_preview:
+                    if "drive.google.com" in file_web_link and "/view" in file_web_link:
+                        embed_preview_url = file_web_link.replace("/view", "/preview")
+                    elif f"https://drive.google.com/file/d/{chosen_file_id}" not in file_web_link:
+                        embed_preview_url = f"https://drive.google.com/file/d/{chosen_file_id}/preview"
+                    else:
+                        embed_preview_url = file_web_link
+
+                    st.components.v1.iframe(embed_preview_url, height=500, scrolling=True)
+
+                with col_actions:
+                    st.markdown("### ⚙️ File Actions")
+                    st.markdown(f'<a href="{file_web_link}" target="_blank"><button style="background-color:#10B981; color:white; padding:10px 20px; border:none; border-radius:5px; font-weight:bold; cursor:pointer;">⬇️ OPEN IN DRIVE</button></a>', unsafe_allow_html=True)
+                    
+                    st.divider()
+                    st.markdown("🔒 **Admin File Clean-Up**")
+                    pwd_input_file = st.text_input("Enter Admin Password to delete this file:", type="password", key="drive_file_pwd")
+
+                    if pwd_input_file == target_password:
+                        if st.button(f"🗑️ Delete `{chosen_file_name}` from Google Drive", type="primary"):
+                            with st.spinner("Deleting file permanently from Google Drive..."):
+                                success, del_msg = delete_single_drive_file(chosen_file_id)
+                            
+                            if success:
+                                st.session_state.drive_tab_msg = f"🗑️ **SUCCESS!** `{chosen_file_name}` was permanently removed from Google Drive."
+                                st.rerun()
+                            else:
+                                st.error(del_msg)
+                    elif pwd_input_file != "":
+                        st.error("❌ Incorrect Admin Password.")
+            else:
+                st.info(f"No PDF files found matching Date/Event pattern for **{filter_formatted_date}**. Try selecting a different date above.")
         else:
-            st.error(f"No event found matching Event ID '{search_id}'.")
-    elif search_id:
-        st.info("Database is empty.")
+            st.info("No files currently found in your Google Drive target folder.")
 
 # ==========================================
 # TAB 3: PENDING EVENTS DASHBOARD & ADMIN APPROVAL
@@ -470,7 +621,6 @@ with tab3:
     if is_authorized:
         st.success("🔓 Admin Authorization Granted!")
 
-        # Display persistent success notification after approval page rerun
         if "approval_success_msg" in st.session_state:
             st.success(st.session_state.approval_success_msg)
             del st.session_state.approval_success_msg
@@ -481,7 +631,6 @@ with tab3:
         """)
 
         if not pending_events_df.empty:
-            # Map pending dropdown options directly to exact row indices in master_data
             pending_options = {}
             for idx, row in pending_events_df.iterrows():
                 label = f"[{row['Event ID']}] {row['Title']} ({row['Date']} at {row['Venue']})"
@@ -495,7 +644,6 @@ with tab3:
                 approved_event_id = master_data.loc[target_idx, 'Event ID']
                 approved_event_title = master_data.loc[target_idx, 'Title']
 
-                # 1. Visual spinner during sheet sync
                 with st.spinner(f"Updating status for Event ID [{approved_event_id}]... Please wait."):
                     master_data.loc[target_idx, 'Status'] = "Officially Confirmed"
                     
@@ -503,10 +651,8 @@ with tab3:
                     conn.update(data=clean_df)
                     st.cache_data.clear()
 
-                # 2. Store success message in Session State for persistence after rerun
                 st.session_state.approval_success_msg = f"👍 **SUCCESS!** Event ID **[{approved_event_id}] - {approved_event_title}** has been officially confirmed and updated in Google Sheets!"
                 
-                # 3. Trigger celebration and refresh
                 st.balloons()
                 st.rerun()
         else:
@@ -568,12 +714,10 @@ with tab4:
             yy = proposed_date.strftime("%y")
             mm = proposed_date.strftime("%m")
             
-            # Generate a unique Event ID based on total database row count
             total_existing_rows = len(master_data) if not master_data.empty else 0
             seq_num = f"{(total_existing_rows + 1):02d}"
             generated_event_id = f"CS-{yy}-{mm}-{seq_num}"
 
-            # Upload PDF files
             if uploaded_pdfs:
                 with st.spinner("Uploading PDF documents to Google Drive..."):
                     materials_link_req = upload_multiple_pdfs_to_drive(uploaded_pdfs, generated_event_id)
